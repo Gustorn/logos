@@ -65,6 +65,15 @@ impl Context {
         self.available.saturating_sub(self.at)
     }
 
+    pub fn trim_available(&mut self, min_read: usize) {
+        // Trim available bytes to what's required.
+        // Wipe available bytes if there isn't enough.
+        match self.remainder().checked_sub(min_read) {
+            None | Some(0) => self.available = 0,
+            Some(overflow) => self.available -= overflow,
+        }
+    }
+
     pub fn read(&mut self, len: usize) -> TokenStream {
         self.available = len;
 
@@ -89,8 +98,7 @@ impl Context {
         }
     }
 
-    pub fn miss(mut self, miss: Option<NodeId>, gen: &mut Generator) -> TokenStream {
-        self.wipe();
+    pub fn miss_read(self, miss: Option<NodeId>, gen: &mut Generator) -> TokenStream {
         match (miss, self.backtrack) {
             (Some(id), _) => gen.goto(id, self).clone(),
             (_, Some(id)) => gen.goto(id, self.backtrack()).clone(),
@@ -99,10 +107,15 @@ impl Context {
         }
     }
 
+    pub fn miss(mut self, miss: Option<NodeId>, gen: &mut Generator) -> TokenStream {
+        self.wipe();
+        self.miss_read(miss, gen)
+    }
+
     pub fn call_args(&self) -> TokenStream {
         match self.available {
             0 | 1 => quote!(),
-            _ => quote!(, arr),
+            _ => quote!(, arr.trim()),
         }
     }
 
@@ -120,7 +133,7 @@ impl Context {
             let _ = write!(buf, "_at{}", self.at);
         }
         if self.available > 0 {
-            let _ = write!(buf, "_with{}", self.available);
+            let _ = write!(buf, "_check{}", self.available);
         }
         if let Some(id) = self.backtrack {
             let _ = write!(buf, "_ctx{}", id);

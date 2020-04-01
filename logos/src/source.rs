@@ -246,6 +246,10 @@ pub trait Split<Target> {
     fn split(self) -> (Target, Self::Remainder);
 }
 
+pub trait Trim<Target> {
+    fn trim(self) -> Target;
+}
+
 impl<'source> Chunk<'source> for u8 {
     const SIZE: usize = 1;
 
@@ -282,6 +286,13 @@ macro_rules! impl_array {
             }
         }
 
+        impl<'source> Trim<&'source [u8; $size]> for &'source [u8; $size] {
+            #[inline]
+            fn trim(self) -> Self {
+                self
+            }
+        }
+
         $(
             impl_array! { @byte $size, $split }
 
@@ -294,6 +305,15 @@ macro_rules! impl_array {
                         Chunk::from_ptr(self as *const u8),
                         Chunk::from_ptr((self as *const u8).add($split)),
                     )}
+                }
+            }
+
+            impl<'source> Trim<&'source [u8; $split]> for &'source [u8; $size] {
+                #[inline]
+                fn trim(self) -> &'source [u8; $split] {
+                    unsafe {
+                        &*(self as *const [u8; $size] as *const u8 as *const [u8; $split])
+                    }
                 }
             }
         )*

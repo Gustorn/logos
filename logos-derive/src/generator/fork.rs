@@ -17,13 +17,11 @@ impl<'a> Generator<'a> {
         let loops_to_self = self.meta[this].loop_entry_from.contains(&this);
 
         match targets.len() {
-            1 if loops_to_self => return self.generate_fast_loop(fork, ctx),
+            1 if loops_to_self => return self.generate_hot_loop(fork, ctx),
             0..=2 => (),
             _ => return self.generate_fork_jump_table(this, fork, targets, ctx),
         }
-        let miss = ctx.miss(fork.miss, self);
-        let end = self.fork_end(this, &miss);
-        let (byte, read) = self.fork_read(this, end, &mut ctx);
+        let (miss, read, byte) = self.fork_miss_read_byte(this, fork, &mut ctx);
         let branches = targets.into_iter().map(|(id, ranges)| {
             match *ranges {
                 [range] => {
@@ -50,9 +48,7 @@ impl<'a> Generator<'a> {
     }
 
     fn generate_fork_jump_table(&mut self, this: NodeId, fork: &Fork, targets: Targets, mut ctx: Context) -> TokenStream {
-        let miss = ctx.miss(fork.miss, self);
-        let end = self.fork_end(this, &miss);
-        let (byte, read) = self.fork_read(this, end, &mut ctx);
+        let (miss, read, byte) = self.fork_miss_read_byte(this, fork, &mut ctx);
 
         let mut table: [u8; 256] = [0; 256];
 
@@ -82,27 +78,32 @@ impl<'a> Generator<'a> {
         }
     }
 
-    fn fork_end(&self, this: NodeId, miss: &TokenStream) -> TokenStream {
-        if this == self.root {
-            quote!(_end(lex))
-        } else {
-            miss.clone()
-        }
-    }
-
-    fn fork_read(&self, this: NodeId, end: TokenStream, ctx: &mut Context) -> (TokenStream, TokenStream) {
+    fn fork_miss_read_byte(
+        &mut self,
+        this: NodeId,
+        fork: &Fork,
+        ctx: &mut Context
+    ) -> (TokenStream, TokenStream, TokenStream) {
+        let miss = ctx.miss_read(fork.miss, self);
         let min_read = self.meta[this].min_read;
 
         if ctx.remainder() >= min_read {
             let at = ctx.at();
 
             return (
-                quote!(arr[#at]),
+                miss,
                 quote!(),
+                quote!(arr[#at]),
             );
         }
 
-        match self.meta[this].min_read {
+        let end = if this == self.root {
+            quote!(_end(lex))
+        } else {
+            ctx.miss(fork.miss, self)
+        };
+
+        let (byte, read) = match self.meta[this].min_read {
             0 | 1 => {
                 let read = ctx.read(0);
 
@@ -129,22 +130,24 @@ impl<'a> Generator<'a> {
                     },
                 )
             },
-        }
+        };
+
+        (miss, read, byte)
     }
 
-    fn generate_fast_loop(&mut self, fork: &Fork, ctx: Context) -> TokenStream {
+    fn generate_hot_loop(&mut self, fork: &Fork, ctx: Context) -> TokenStream {
         let miss = ctx.miss(fork.miss, self);
         let ranges = fork.branches().map(|(range, _)| range).collect::<Vec<_>>();
         let test = self.generate_test(ranges);
 
         quote! {
-            _fast_loop!(lex, #test, #miss);
+            _hot_loop!(lex, #test, #miss);
         }
     }
 
-    pub fn fast_loop_macro() -> TokenStream {
+    pub fn hot_loop_macro() -> TokenStream {
         quote! {
-            macro_rules! _fast_loop {
+            macro_rules! _hot_loop {
                 ($lex:ident, $test:ident, $miss:expr) => {
                     // Do one bounds check for multiple bytes till EOF
                     while let Some(arr) = $lex.read::<&[u8; 16]>() {

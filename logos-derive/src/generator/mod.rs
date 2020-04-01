@@ -38,7 +38,7 @@ pub struct Generator<'a> {
 
 impl<'a> Generator<'a> {
     pub fn new(name: &'a Ident, root: NodeId, graph: &'a Graph<Leaf>) -> Self {
-        let rendered = Self::fast_loop_macro();
+        let rendered = Self::hot_loop_macro();
         let meta = Meta::analyze(root, graph);
 
         Generator {
@@ -96,9 +96,7 @@ impl<'a> Generator<'a> {
             } else {
                 None
             };
-            if meta.min_read == 0 || ctx.remainder() < meta.min_read  {
-                ctx.wipe();
-            }
+            ctx.trim_available(meta.min_read);
 
             let ident = self.generate_ident(id, ctx);
             let args = ctx.call_args();
